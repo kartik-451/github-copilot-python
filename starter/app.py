@@ -15,11 +15,13 @@ def index():
 
 @app.route('/new')
 def new_game():
-    clues = int(request.args.get('clues', 35))
-    puzzle, solution = sudoku_logic.generate_puzzle(clues)
+    difficulty = request.args.get('difficulty', 'medium').strip().lower()
+    clues_raw = request.args.get('clues', '')
+    clues = int(clues_raw) if clues_raw else None
+    puzzle, solution = sudoku_logic.generate_puzzle(clues=clues, difficulty=difficulty)
     CURRENT['puzzle'] = puzzle
     CURRENT['solution'] = solution
-    return jsonify({'puzzle': puzzle})
+    return jsonify({'puzzle': puzzle, 'difficulty': difficulty})
 
 @app.route('/check', methods=['POST'])
 def check_solution():
@@ -34,6 +36,21 @@ def check_solution():
             if board[i][j] != solution[i][j]:
                 incorrect.append([i, j])
     return jsonify({'incorrect': incorrect})
+
+@app.route('/hint')
+def get_hint():
+    puzzle = CURRENT.get('puzzle')
+    solution = CURRENT.get('solution')
+    if puzzle is None or solution is None:
+        return jsonify({'error': 'No game in progress'}), 400
+
+    for row in range(sudoku_logic.SIZE):
+        for col in range(sudoku_logic.SIZE):
+            if puzzle[row][col] == sudoku_logic.EMPTY:
+                puzzle[row][col] = solution[row][col]
+                return jsonify({'row': row, 'col': col, 'value': solution[row][col]})
+
+    return jsonify({'error': 'No empty cells left'}), 400
 
 if __name__ == '__main__':
     app.run(debug=True)
