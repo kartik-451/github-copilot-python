@@ -6,6 +6,7 @@ let startTime = null;
 let timerRunning = false;
 const LEADERBOARD_KEY = 'sudoku-leaderboard';
 let completedTime = 0;
+let hintsUsed = 0;
 
 function formatTime(seconds) {
   const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -43,7 +44,14 @@ function getLeaderboard() {
   const stored = localStorage.getItem(LEADERBOARD_KEY);
   if (!stored) return [];
   try {
-    return JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((entry) => ({
+      playerName: entry.playerName || 'Player',
+      time: Number(entry.time) || 0,
+      difficulty: entry.difficulty || 'Medium',
+      hintsUsed: Number(entry.hintsUsed) || 0
+    }));
   } catch (e) {
     return [];
   }
@@ -76,7 +84,7 @@ function renderLeaderboard() {
 
   leaderboardDiv.innerHTML = '<h3>Leaderboard</h3><ol>' + entries.map((entry, index) => {
     const timeLabel = `${Math.floor(entry.time / 60).toString().padStart(2, '0')}:${(entry.time % 60).toString().padStart(2, '0')}`;
-    return `<li>#${index + 1} ${entry.playerName} — ${timeLabel} — ${entry.difficulty}</li>`;
+    return `<li>#${index + 1} ${entry.playerName} — ${timeLabel} — ${entry.difficulty} — Hints: ${entry.hintsUsed}</li>`;
   }).join('') + '</ol>';
 }
 
@@ -87,11 +95,76 @@ function addLeaderboardEntry() {
   entries.push({
     playerName: playerName.trim() || 'Player',
     time: completedTime,
-    difficulty: difficulty.charAt(0).toUpperCase() + difficulty.slice(1)
+    difficulty: difficulty.charAt(0).toUpperCase() + difficulty.slice(1),
+    hintsUsed: hintsUsed
   });
   entries.sort((a, b) => a.time - b.time);
   saveLeaderboard(entries.slice(0, 10));
   renderLeaderboard();
+}
+
+function hasConflict(board, row, col, value) {
+  for (let c = 0; c < SIZE; c++) {
+    if (c !== col && board[row][c] === value) return true;
+  }
+  for (let r = 0; r < SIZE; r++) {
+    if (r !== row && board[r][col] === value) return true;
+  }
+  const boxRow = Math.floor(row / 3) * 3;
+  const boxCol = Math.floor(col / 3) * 3;
+  for (let r = boxRow; r < boxRow + 3; r++) {
+    for (let c = boxCol; c < boxCol + 3; c++) {
+      if ((r !== row || c !== col) && board[r][c] === value) return true;
+    }
+  }
+  return false;
+}
+
+function updateCellValidation() {
+  const boardDiv = document.getElementById('sudoku-board');
+  if (!boardDiv) return;
+
+  const inputs = boardDiv.getElementsByTagName('input');
+  const board = [];
+  for (let i = 0; i < SIZE; i++) {
+    board[i] = [];
+    for (let j = 0; j < SIZE; j++) {
+      const idx = i * SIZE + j;
+      const val = inputs[idx].value;
+      board[i][j] = val ? parseInt(val, 10) : 0;
+    }
+  }
+
+  for (let idx = 0; idx < inputs.length; idx++) {
+    const inp = inputs[idx];
+    if (inp.disabled) {
+      applyCellClasses(inp, 'prefilled');
+      continue;
+    }
+
+    const row = parseInt(inp.dataset.row, 10);
+    const col = parseInt(inp.dataset.col, 10);
+    const value = inp.value;
+    if (value && hasConflict(board, row, col, parseInt(value, 10))) {
+      applyCellClasses(inp, 'incorrect');
+    } else {
+      applyCellClasses(inp);
+    }
+  }
+}
+
+function getBoxClass(row, col) {
+  return (Math.floor(row / 3) + Math.floor(col / 3)) % 2 === 0 ? 'box-a' : 'box-b';
+}
+
+function applyCellClasses(input, extraClass = '') {
+  const row = parseInt(input.dataset.row, 10);
+  const col = parseInt(input.dataset.col, 10);
+  const classes = ['sudoku-cell', getBoxClass(row, col)];
+  if (extraClass) {
+    classes.push(extraClass);
+  }
+  input.className = classes.join(' ');
 }
 
 function createBoardElement() {
@@ -104,13 +177,14 @@ function createBoardElement() {
       const input = document.createElement('input');
       input.type = 'text';
       input.maxLength = 1;
-      input.className = 'sudoku-cell';
       input.dataset.row = i;
       input.dataset.col = j;
       input.addEventListener('input', (e) => {
         const val = e.target.value.replace(/[^1-9]/g, '');
         e.target.value = val;
+        updateCellValidation();
       });
+      applyCellClasses(input);
       rowDiv.appendChild(input);
     }
     boardDiv.appendChild(rowDiv);
@@ -130,17 +204,20 @@ function renderPuzzle(puz) {
       if (val !== 0) {
         inp.value = val;
         inp.disabled = true;
-        inp.className += ' prefilled';
+        applyCellClasses(inp, 'prefilled');
       } else {
         inp.value = '';
         inp.disabled = false;
+        applyCellClasses(inp);
       }
     }
   }
+  updateCellValidation();
 }
 
 async function newGame() {
   const difficulty = document.getElementById('difficulty-select').value;
+  hintsUsed = 0;
   const res = await fetch(`/new?difficulty=${difficulty}`);
   const data = await res.json();
   renderPuzzle(data.puzzle);
@@ -176,10 +253,14 @@ async function checkSolution() {
   const incorrect = new Set(data.incorrect.map(x => x[0]*SIZE + x[1]));
   for (let idx = 0; idx < inputs.length; idx++) {
     const inp = inputs[idx];
-    if (inp.disabled) continue;
-    inp.className = 'sudoku-cell';
+    if (inp.disabled) {
+      applyCellClasses(inp, 'prefilled');
+      continue;
+    }
     if (incorrect.has(idx)) {
-      inp.className = 'sudoku-cell incorrect';
+      applyCellClasses(inp, 'incorrect');
+    } else {
+      applyCellClasses(inp);
     }
   }
   if (incorrect.size === 0) {
@@ -210,7 +291,9 @@ async function giveHint() {
   const inp = inputs[idx];
   inp.value = data.value;
   inp.disabled = true;
-  inp.className = 'sudoku-cell prefilled';
+  hintsUsed += 1;
+  applyCellClasses(inp, 'prefilled');
+  updateCellValidation();
   document.getElementById('message').innerText = 'Hint used.';
 }
 
