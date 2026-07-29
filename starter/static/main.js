@@ -156,7 +156,9 @@ function updateCellValidation() {
 function getBoxClass(row, col) {
   return (Math.floor(row / 3) + Math.floor(col / 3)) % 2 === 0 ? 'box-a' : 'box-b';
 }
-
+// After reviewing Copilot's suggestion, I kept this shared helper
+// because it removes duplicated class-building logic and makes
+// validation and solution checking easier to maintain.
 function applyCellClasses(input, extraClass = '') {
   const row = parseInt(input.dataset.row, 10);
   const col = parseInt(input.dataset.col, 10);
